@@ -6,7 +6,7 @@ model_reasoning_effort = "xhigh"
 [model_providers.deepseek]
 name = "Moon Bridge Proxy"
 wire_api = "responses"
-base_url = "http://127.0.0.1:38440/v1"
+base_url = "http://127.0.0.1:38442/v1"
 
 [marketplaces.openai-bundled]
 last_updated = "2026-05-23T16:07:29Z"

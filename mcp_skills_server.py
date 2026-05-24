@@ -366,6 +366,11 @@ async def list_tools() -> list[types.Tool]:
             description="Get GitHub authentication setup guide: HTTPS tokens, SSH keys, gh CLI login. Use when setting up GitHub access.",
             inputSchema={"type": "object", "properties": {}}
         ),
+        types.Tool(
+            name="what_model",
+            description="Report which DeepSeek model is currently active. Reads config.toml to show the real model name in use.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
     ]
 
 
@@ -1297,6 +1302,19 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     elif name == "github_auth":
         result = _github_auth_sync()
         return [types.TextContent(type="text", text=result["guide"])]
+
+    elif name == "what_model":
+        import re
+        cfg = os.path.expanduser("~/.codex/config.toml")
+        try:
+            with open(cfg) as f:
+                text = f.read()
+            m = re.search(r'^model\s*=\s*"(.+)"', text, re.MULTILINE)
+            model = m.group(1) if m else "unknown"
+        except:
+            model = "error reading config"
+        result = f"Current model: **{model}**（底层 API: DeepSeek, 经由 Moon Bridge 转发）"
+        return [types.TextContent(type="text", text=result)]
 
     else:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]

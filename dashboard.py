@@ -743,13 +743,10 @@ if __name__ == "__main__":
 
     async def serve_all():
         ui_cfg = uvicorn.Config(app, host="127.0.0.1", port=UI_PORT, log_level="warning")
-        filter_cfg = uvicorn.Config(app, host="127.0.0.1", port=FILTER_PORT, log_level="warning")
         ui_server = uvicorn.Server(ui_cfg)
-        filter_server = uvicorn.Server(filter_cfg)
-        # 共用同一个 asyncio loop 同时监听两个端口
-        await asyncio.gather(ui_server.serve(), filter_server.serve())
+        await ui_server.serve()
 
     print(f"🎛️  控制台 UI    → http://127.0.0.1:{UI_PORT}")
-    print(f"🔧 Tool 过滤层  → http://127.0.0.1:{FILTER_PORT}  (Codex 指向这里)")
+    print(f"🔧 Tool 过滤层  → 由 tool_filter_mini.py 独立运行")
     print(f"⛓️  Moon Bridge  → http://127.0.0.1:{MOON_PORT}")
     asyncio.run(serve_all())
