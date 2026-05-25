@@ -1,5 +1,10 @@
+# 运行时生成
+moonbridge.log
+*.log
+
+# 敏感配置
 config.yml
+
+# Python 缓存
 __pycache__/
 *.pyc
-dashboard.log
-moon-bridge/data/

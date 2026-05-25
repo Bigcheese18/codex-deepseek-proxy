@@ -39,11 +39,14 @@ GO_EXE = str(HOME / "go1.25.10" / "bin" / "go.exe")
 MOON_PORT = 38440
 UI_PORT = 38441
 FILTER_PORT = 38442
+MOON_LOG_FILE = BASE / "moonbridge.log"
 
 app = FastAPI()
 
 # ── 全局状态 ────────────────────────────────────────────────
 _moon_bridge_proc: subprocess.Popen | None = None
+_moon_log_file: int | None = None  # file descriptor for Moon Bridge log pipe
+_moon_log_task: asyncio.Task | None = None
 log_buffer: list[str] = ["📋 控制台已就绪"]
 filter_stats = {"total": 0, "filtered": 0}   # 过滤器累计统计
 
@@ -216,6 +219,27 @@ def _check_codex_running() -> bool:
     return False
 
 
+async def _tail_moon_log():
+    """后台读取 Moon Bridge 日志并推送到 log_buffer"""
+    global _moon_log_file
+    log_path = MOON_LOG_FILE
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            f.seek(0, 2)  # 跳到文件末尾
+            while _moon_bridge_proc and _moon_bridge_proc.poll() is None:
+                line = f.readline()
+                if line:
+                    line = line.strip()
+                    if line:
+                        _log(f"🌙 {line}", "info")
+                else:
+                    await asyncio.sleep(0.3)
+    except Exception as e:
+        _log(f"🌙 日志读取异常: {e}", "error")
+
+
 # ── Dashboard HTML ────────────────────────────────────────────
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -373,15 +397,17 @@ button:hover{opacity:.85}
   </div>
 
   <!-- 日志 -->
-  <div class="card">
+    <div class="card">
     <h2>📋 运行日志</h2>
     <div class="row" style="margin-bottom:10px">
       <button class="btn-action" onclick="refreshLogs()">🔄 刷新</button>
       <button onclick="clearLogs()">🗑 清空</button>
+      <button id="moon-log-btn" onclick="toggleMoonLogs()" style="background:#1a3a6b;border-color:#58a6ff;color:#fff">🌙 Moon 日志</button>
     </div>
     <div class="log-box" id="log-box">
       <div class="log-line info">📋 控制台已就绪</div>
     </div>
+    <div class="meta" id="log-source-label">来源: 控制台日志</div>
   </div>
 
 </div>
@@ -491,17 +517,35 @@ async function restartCodex() {
   setTimeout(refresh, 3000);
 }
 
+let moonLogMode = false;
+
 async function refreshLogs() {
   try {
-    const r = await fetch(API + '/api/logs');
+    const r = await fetch(API + (moonLogMode ? '/api/moon-logs' : '/api/logs'));
     const d = await r.json();
     const box = document.getElementById('log-box');
     box.innerHTML = d.lines.map(l => {
-      const cls = l.startsWith('❌') ? 'error' : l.startsWith('✅') ? 'success' : 'info';
+      const cls = l.startsWith('❌') ? 'error' : l.startsWith('✅') ? 'success' : (l.includes('🌙') ? 'info' : 'info');
       return `<div class="log-line ${cls}">${escapeHtml(l)}</div>`;
     }).join('');
     box.scrollTop = box.scrollHeight;
   } catch(e) {}
+}
+
+function toggleMoonLogs() {
+  moonLogMode = !moonLogMode;
+  const btn = document.getElementById('moon-log-btn');
+  const label = document.getElementById('log-source-label');
+  if (moonLogMode) {
+    btn.style.background = '#238636';
+    btn.textContent = '📋 控制台日志';
+    label.textContent = '来源: 🌙 Moon Bridge 原始日志';
+  } else {
+    btn.style.background = '#1a3a6b';
+    btn.textContent = '🌙 Moon 日志';
+    label.textContent = '来源: 控制台日志';
+  }
+  refreshLogs();
 }
 
 async function clearLogs() {
@@ -539,7 +583,7 @@ async def api_status():
 
 @app.post("/api/proxy/start")
 async def api_start():
-    global _moon_bridge_proc
+    global _moon_bridge_proc, _moon_log_task
     if _check_port_open(MOON_PORT):
         return {"ok": False, "error": "Moon Bridge 已在运行"}
     try:
@@ -552,10 +596,11 @@ async def api_start():
             [GO_EXE, "run", "./cmd/moonbridge", "--config", "config.yml"],
             cwd=str(MOON_DIR),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=open(MOON_LOG_FILE, "a", buffering=1, encoding="utf-8"),
+            stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+        _moon_log_task = asyncio.create_task(_tail_moon_log())
         _log(f"Moon Bridge 已启动 PID={_moon_bridge_proc.pid}", "success")
         return {"ok": True, "pid": _moon_bridge_proc.pid}
     except Exception as e:
@@ -565,7 +610,10 @@ async def api_start():
 
 @app.post("/api/proxy/stop")
 async def api_stop():
-    global _moon_bridge_proc
+    global _moon_bridge_proc, _moon_log_task
+    if _moon_log_task:
+        _moon_log_task.cancel()
+        _moon_log_task = None
     if _moon_bridge_proc and _moon_bridge_proc.poll() is None:
         _moon_bridge_proc.terminate()
         _log("Moon Bridge 已停止", "success")
@@ -623,6 +671,18 @@ async def api_clear_logs():
 @app.get("/api/filter/stats")
 async def api_filter_stats():
     return filter_stats
+
+
+@app.get("/api/moon-logs")
+async def api_moon_logs():
+    """返回 Moon Bridge 原始日志文件内容"""
+    try:
+        if MOON_LOG_FILE.exists():
+            lines = MOON_LOG_FILE.read_text(encoding="utf-8").splitlines()
+            return {"lines": lines[-200:]}
+        return {"lines": ["🌙 Moon Bridge 日志文件不存在"]}
+    except Exception as e:
+        return {"lines": [f"❌ 读取日志失败: {e}"]}
 
 
 # ── 迷你模型切换器（小窗口用） ───────────────────────────────
