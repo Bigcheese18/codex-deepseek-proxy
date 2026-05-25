@@ -8,3 +8,11 @@ model_catalog_json = "C:\\Users\\21238\\.codex\\models_catalog.json"
 name = "Moon Bridge"
 base_url = "http://127.0.0.1:38442/v1"
 wire_api = "responses"
+
+[mcp_servers.dev_tools]
+args = ["-u", "C:\\Users\\21238\\Desktop\\Codex\\mcp_skills_server.py"]
+command = "C:\\Users\\21238\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe"
+startup_timeout_sec = 30
+
+[windows]
+sandbox = "elevated"
